@@ -5,13 +5,15 @@ sys_err_gen - 系统错误码 Verilog 代码自动生成工具
 根据 Excel 错误表、匹配配置和 Jinja2 模板，自动生成 Verilog RTL 代码。
 
 流程:
-    1. 读取 YAML 配置 -> 2. 加载 Excel 数据 -> 3. 列匹配筛选 -> 4. 模板渲染 -> 5. 输出 .v 文件
+    1. 读取 YAML 配置 -> 2. 加载 Excel 数据 -> 3. 列匹配筛选
+    -> 4. 模板渲染 -> 5. 代码保护合并 -> 6. 输出 .v 文件
 
 使用方式:
     python -m src.main                          # 使用默认配置
     python -m src.main -c config/custom.yaml    # 指定配置文件
     python -m src.main -l DEBUG                 # 指定日志级别
     python -m src.main -o output/my_module.v    # 指定输出文件
+    python -m src.main --no-merge               # 不使用代码保护合并
 """
 
 import argparse
@@ -23,7 +25,7 @@ from src.core.config import AppConfig, load_config
 from src.core.excel_reader import ExcelReader
 from src.core.logger import LogManager, get_logger
 from src.core.matcher import ColumnMatcher
-from src.core.template_engine import TemplateEngine
+from src.core.template_engine import TemplateEngine, SectionProtector
 
 logger = get_logger(__name__)
 
@@ -39,6 +41,7 @@ def parse_args() -> argparse.Namespace:
   python -m src.main -c config/power_match.yaml
   python -m src.main -l INFO
   python -m src.main -o output/power_err.v
+  python -m src.main --no-merge
         """,
     )
     parser.add_argument(
@@ -66,27 +69,33 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Excel 输入文件路径 (默认: 使用配置文件中的设置)",
     )
+    parser.add_argument(
+        "--no-merge",
+        action="store_true",
+        default=False,
+        help="禁用代码保护合并（首次生成或强制覆盖所有代码）",
+    )
     return parser.parse_args()
 
 
-def run(config: AppConfig) -> str:
+def run(config: AppConfig, enable_merge: bool = True) -> str:
     """
     执行主流程
 
     Args:
         config: 应用配置对象
+        enable_merge: 是否启用用户代码保护合并
 
     Returns:
-        生成的 Verilog 代码字符串
+        最终写入的 Verilog 代码字符串
 
     Raises:
         FileNotFoundError: 输入文件不存在时抛出
         ValueError: 配置错误或数据为空时抛出
-        RuntimeError: 执行过程中发生未知错误时抛出
     """
     # ---- 步骤 1: 读取 Excel ----
     logger.info("=" * 60)
-    logger.info("步骤 1/4: 读取 Excel 文件")
+    logger.info("步骤 1/5: 读取 Excel 文件")
     logger.info("=" * 60)
 
     reader = ExcelReader(config.excel.file)
@@ -103,7 +112,7 @@ def run(config: AppConfig) -> str:
 
     # ---- 步骤 2: 列匹配 ----
     logger.info("=" * 60)
-    logger.info("步骤 2/4: 执行列匹配筛选")
+    logger.info("步骤 2/5: 执行列匹配筛选")
     logger.info("=" * 60)
 
     for col_cfg in config.match.columns:
@@ -118,7 +127,7 @@ def run(config: AppConfig) -> str:
 
     # ---- 步骤 3: 模板渲染 ----
     logger.info("=" * 60)
-    logger.info("步骤 3/4: 渲染 Verilog 代码模板")
+    logger.info("步骤 3/5: 渲染 Verilog 代码模板")
     logger.info("=" * 60)
 
     engine = TemplateEngine(config.template)
@@ -127,16 +136,35 @@ def run(config: AppConfig) -> str:
         "sheet_name": config.excel.sheet,
         "generated_by": "sys_err_gen",
     }
-    verilog_code = engine.render(matched, extra_context=extra_context)
+    new_code = engine.render(matched, extra_context=extra_context)
 
-    # ---- 步骤 4: 输出文件 ----
-    logger.info("=" * 60)
-    logger.info("步骤 4/4: 写入 Verilog 文件")
-    logger.info("=" * 60)
-
+    # ---- 步骤 4: 代码保护合并 ----
     output_path = config.output.directory
     output_file = str(Path(output_path) / config.output.filename)
     Path(output_path).mkdir(parents=True, exist_ok=True)
+
+    if enable_merge:
+        logger.info("=" * 60)
+        logger.info("步骤 4/5: 用户代码保护合并")
+        logger.info("=" * 60)
+
+        old_code: Optional[str] = None
+        if Path(output_file).exists():
+            with open(output_file, "r", encoding="utf-8") as f:
+                old_code = f.read()
+            logger.info("检测到旧代码文件，提取 USER_CODE 区域进行合并...")
+        else:
+            logger.info("首次生成，直接使用新代码")
+
+        final_code = SectionProtector.merge(new_code, old_code)
+    else:
+        logger.info("步骤 4/5: 跳过代码保护合并 (--no-merge)")
+        final_code = new_code
+
+    # ---- 步骤 5: 输出文件 ----
+    logger.info("=" * 60)
+    logger.info("步骤 5/5: 写入 Verilog 文件")
+    logger.info("=" * 60)
 
     if Path(output_file).exists() and not config.output.overwrite:
         raise FileExistsError(
@@ -144,15 +172,15 @@ def run(config: AppConfig) -> str:
         )
 
     with open(output_file, "w", encoding="utf-8") as f:
-        f.write(verilog_code)
+        f.write(final_code)
 
     logger.info("Verilog 代码已写入: %s", output_file)
-    logger.info("文件大小: %d 字节", len(verilog_code))
+    logger.info("文件大小: %d 字节", len(final_code))
     logger.info("=" * 60)
     logger.info("生成完毕！")
     logger.info("=" * 60)
 
-    return verilog_code
+    return final_code
 
 
 def main() -> None:
@@ -160,10 +188,8 @@ def main() -> None:
     args = parse_args()
 
     try:
-        # 加载配置
         config = load_config(args.config)
 
-        # 命令行参数覆盖配置文件
         if args.log_level:
             config.logging.level = args.log_level
         if args.output:
@@ -172,7 +198,6 @@ def main() -> None:
         if args.excel:
             config.excel.file = args.excel
 
-        # 初始化日志系统
         LogManager.init(
             log_level=config.logging.level,
             log_dir=config.logging.dir,
@@ -182,8 +207,7 @@ def main() -> None:
         logger.info("sys_err_gen 启动")
         logger.debug("配置详情: %s", config.model_dump_json(indent=2))
 
-        # 执行主流程
-        run(config)
+        run(config, enable_merge=not args.no_merge)
 
     except FileNotFoundError as e:
         logger.error("文件未找到: %s", e)

@@ -23,149 +23,188 @@ module sys_err_gen #(
     // 可配置参数
     // --------------------------------------------------------------------------
 ) (
-    // --------------------------------------------------------------------------
-    // 时钟与复位
-    // --------------------------------------------------------------------------
-    input  wire                          sys_clk,              // 系统时钟
-    input  wire                          sys_rst_n,            // 异步复位，低有效
-    input  wire                          fs_clk,                   
-    input  wire                          fs_rst_n,             // 异步复位，低有效
+    // ======================================================================
+    // io_declarations
+    // 时钟与复位（固定）
+    // ======================================================================
+    input  wire                          sys_clk,            // 系统时钟
+    input  wire                          sys_rstn_sys,       // 异步复位，低有效
+    input  wire                          fs_clk,             // 功能安全时钟
+    input  wire                          sys_fs_rstn_fs,     // 功能安全异步复位，低有效
 
     // --------------------------------------------------------------------------
     // 监控输入信号
     // --------------------------------------------------------------------------
 {% for err in errors %}
-    input  wire                          {{ err["数字信号"] }},  // {{ err["模块"] }} - {{ err["错误"] }}
+    input  wire                          {{ err["数字信号"] | pad_r(sig_max_width) }},  // {{ err["模块"] }} - {{ err["错误"] }}
 {% endfor %}
-    
     // --------------------------------------------------------------------------
-    // 错误执行
+    // 错误执行信号
     // --------------------------------------------------------------------------
 {% for err in errors %}
-    input  wire                          {{ err["数字信号"] }}_imp,  // imp
+    input  wire                          {{ err["数字信号"] }}_imp{{ " " | pad_r(imp_max_width - (err["数字信号"]|length) - 4) }},  // imp
 {% endfor %}
+
+    // ======================================================================
+    // 用户代码
+    // ======================================================================
 
     // --------------------------------------------------------------------------
     // 错误输出
     // --------------------------------------------------------------------------
-    output wire [3:0]                    flt_err_cnt       // 故障错误计数器
+    output wire [3:0]                    flt_err_cnt         // 故障错误计数器
 );
 
     // ==========================================================================
     // 内部信号定义
     // ==========================================================================
-    // 
-    reg  [ERROR_COUNT-1:0]               err_flags_reg;
-    reg  [ERROR_COUNT-1:0]               err_flags_next;
 
-    // 错误码寄存器
-    reg  [ERR_CODE_WIDTH-1:0]            err_code_reg;
-    reg  [ERR_CODE_WIDTH-1:0]            err_code_next;
-
-    // 故障计数器
-    reg  [3:0]                           flt_err_cnt_reg;
-    reg  [3:0]                           flt_err_cnt_next;
-    reg                                  flt_err_cnt_inc;  // 计数器递增标志
-
-    // ==========================================================================
-    // 错误码定义 (Localparam)
-    // ==========================================================================
 {% for err in errors %}
-    localparam ERR_CODE_{{ err["数字信号"] | upper }}  = 8'h{{ "%02X" % (loop.index + 16) }};  // {{ err["模块"] }} - {{ err["错误"] }}
+    wire                                 {{ err["数字信号"]}}_hs;      // 同步到 hs 域
 {% endfor %}
-    // ==========================================================================
-    // 主时序逻辑: 错误标志寄存器
-    // ==========================================================================
-    always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            err_flags_reg <= {ERROR_COUNT{1'b0}};
-        end else begin
-            err_flags_reg <= err_flags_next;
-        end
-    end
 
-    // ==========================================================================
-    // 组合逻辑: 错误标志更新
-    // ==========================================================================
-    always @(*) begin
-        err_flags_next = err_flags_reg;
+
 {% for err in errors %}
-        // {{ err["模块"] }} - {{ err["错误"] }}: 监测 {{ err["数字信号"] }}
-        if ({{ err["数字信号"] }}) begin
-            err_flags_next[{{ loop.index0 }}] = 1'b1;
-        end else if (err_rstb) begin
-            err_flags_next[{{ loop.index0 }}] = 1'b0;
-        end
+    wire                                 {{ err["数字信号"]}}_fs;      // 同步到 fs 域
 {% endfor %}
-    end
 
-    // ==========================================================================
-    // 主时序逻辑: 错误码寄存器
-    // ==========================================================================
-    always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            err_code_reg <= {ERR_CODE_WIDTH{1'b0}};
-        end else begin
-            err_code_reg <= err_code_next;
-        end
-    end
 
-    // ==========================================================================
-    // 组合逻辑: 错误码优先级编码器
-    // 优先级: 低索引 > 高索引（索引 0 优先级最高）
-    // ==========================================================================
-    always @(*) begin
-        err_code_next = {ERR_CODE_WIDTH{1'b0}};
 {% for err in errors %}
-        if (err_flags_reg[{{ loop.index0 }}]) begin
-{% if loop.first %}
-            err_code_next = ERR_CODE_{{ err["数字信号"] | upper }};
-{% else %}
-            if (!err_flags_reg[{{ loop.index0 - 1 }}:0]) begin
-                err_code_next = ERR_CODE_{{ err["数字信号"] | upper }};
-            end
-{% endif %}
-        end
+    wire                                 {{ err["数字信号"]}}_fs_d;    // fs 域打一拍
+    wire                                 {{ err["数字信号"]}}_fs_pos;  // fs 域上升沿
 {% endfor %}
-    end
 
-    // ==========================================================================
-    // 主时序逻辑: 故障错误计数器
-    // ==========================================================================
-    always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            flt_err_cnt_reg <= 4'd0;
-        end else begin
-            flt_err_cnt_reg <= flt_err_cnt_next;
-        end
-    end
 
-    // ==========================================================================
-    // 组合逻辑: 故障计数器更新
-    // ==========================================================================
-    always @(*) begin
-        flt_err_cnt_next = flt_err_cnt_reg;
-        flt_err_cnt_inc = 1'b0;
 {% for err in errors %}
-{% if err["FLT_ERR_CNT"] and err["FLT_ERR_CNT"] != "" %}
-        // {{ err["模块"] }} - {{ err["错误"] }} 触发时计数器递增
-        if (err_flags_reg[{{ loop.index0 }}] && !err_flags_next[{{ loop.index0 }}]) begin
-            flt_err_cnt_next = flt_err_cnt_reg + 4'd1;
-        end
+    wire                                 {{ err["数字信号"]}}_imp_sync; // imp 同步到 fs 域
+{% endfor %}
+
+
+    // ======================================================================
+    // sync to hs 
+    // ======================================================================
+{% for err in errors %}
+    clk_tran_2 utran_{{ err["数字信号"]}}_hs (.clk(sys_clk), .rstn(sys_rstn), .signal_in({{ err["数字信号"]}}), .signal_out({{ err["数字信号"]}}_hs));  // {{ err["模块"] }} - {{ err["错误"] }}
+{% endfor %}
+
+
+    // ==========================================================================
+    // sync to fs
+    // ==========================================================================
+{% for err in errors %}
+    clk_tran_2 utran_{{ err["数字信号"]}}_fs (.clk(fs_clk), .rstn(sys_fs_rstn_fs), .signal_in({{ err["数字信号"]}}), .signal_out({{ err["数字信号"]}}_fs));  // {{ err["模块"] }} - {{ err["错误"] }}
+{% endfor %}
+
+
+    // ======================================================================
+    // fs 域打拍与上升沿检测
+    // ======================================================================
+{% for err in errors %}
+    dff_pn #(1, 0) regx_{{ err["数字信号"]}}_fs_d (.clk(fs_clk), .rstn(sys_fs_rstn_fs), .din({{ err["数字信号"]}}_fs), .dout({{ err["数字信号"]}}_fs_d));  // {{ err["模块"] }} - {{ err["错误"] }}
+{% endfor %}
+{% for err in errors %}
+    assign {{ err["数字信号"]}}_fs_pos = {{ err["数字信号"]}}_fs & ~{{ err["数字信号"]}}_fs_d;
+{% endfor %}
+
+    // ==========================================================================
+    // imp sync to fs
+    // ==========================================================================
+    // 如果RSTB非空，则该项imp[0]有效
+    // 如果FuSa非空，则该项imp[1]有效
+    // 位宽也对应
+{% for err in errors %}
+    clk_tran_2 #(2, 0)utran_{{ err["数字信号"]}}_imp_sync (.clk(fs_clk), .rstn(sys_fs_rstn_fs), .signal_in({{ err["数字信号"]}}_imp), .signal_out({{ err["数字信号"]}}_imp_sync));  // {{ err["模块"] }} - {{ err["错误"] }}
+{% endfor %}
+
+
+{% if has_rstb %}
+    // ======================================================================
+    // RSTB - 复位请求逻辑（仅包含 RSTB 非空的错误项）
+    // ======================================================================
+    // 如果 RSTB 非空，则该信号具备复位请求源
+    assign sys_err_rstb_req_pre = {
+{% for err in rstb_errors %}
+        {{err["数字信号"]}}_fs_pos{% if not loop.last %},
 {% endif %}
 {% endfor %}
-        // 复位时清零计数器
-        if (err_rstb && (err_flags_reg == {ERROR_COUNT{1'b0}})) begin
-            flt_err_cnt_next = 4'd0;
-        end
-    end
+    };
+
+    // 如果 RSTB 非空，则该 imp[0] 使能位有效
+    assign sys_err_rstb_en = {
+{% for err in rstb_errors %}
+        {{ err["数字信号"]}}_imp_sync[0]{% if not loop.last %},
+{% endif %}
+{% endfor %}
+    };
+{% endif %}
+
+
+    assign sys_err_rstb_req_pre = |(sys_err_rstb_req_pre & sys_err_rstb_en);
+
+
+{% if has_fusa %}
+    // ======================================================================
+    // FuSa - 功能安全请求逻辑（仅包含 FuSa 非空的错误项）
+    // ======================================================================
+    // 如果 FuSa 非空，则该信号具备功能安全请求源
+    assign sys_err_fusa_req_pre = {
+{% for err in fusa_errors %}
+        {{ err["数字信号"]}}_fs_pos{% if not loop.last %},
+{% endif %}
+{% endfor %}
+    };
+
+    // 如果 FuSa 非空，则该 imp[1] 使能位有效
+    assign sys_err_fusa_en = {
+{% for err in fusa_errors %}
+        {{ err["数字信号"]}}_imp_sync[1]{% if not loop.last %},
+{% endif %}
+{% endfor %}
+        };
+{% endif %}
+
+    assign sys_err_fusa_req_pre = |(sys_err_fusa_req_pre & sys_err_fusa_en);
+
+    
+{% if has_fltcnt %}
+    // ==========================================================================
+    // FLT_ERR_CNT - 故障错误计数器逻辑（仅包含 FLT_ERR_CNT 非空的错误项）
+    // ======================================================================
+    // 如果 FLT_ERR_CNT 非空，则该信号参与故障计数
+    assign sys_err_err_cnt_add1_pre = {
+{% for err in fltcnt_errors %}
+        {{ err["数字信号"]}}_fs_pos{% if not loop.last %},
+{% endif %}
+{% endfor %}
+        };
+
+    // 故障计数使能（统一使能）
+    assign flt_cnt_en = {
+{% for err in fltcnt_errors %}
+        1'b1{% if not loop.last %},
+{% endif %}
+{% endfor %}
+        };
+
+    assign sys_err_err_cnt_add1 = sys_err_err_cnt_add1_pre & flt_cnt_en;
+    assign sys_err_fault_cnt_add1_pre = |sys_err_err_cnt_add1;
+
+    // 故障计数累加（无逗号）
+    assign bit_all =
+{% for err in fltcnt_errors %}
+        sys_err_err_cnt_add1[{{ loop.index0 }}]{% if not loop.last %} +
+{% endif %}
+{% endfor %}
+        ;
+
+{% endif %}
+
+    assign sys_err_fault_cnt_pre = (bit_all >= 5'd6) ? 3'd6 : bit_all[2:0];
+    dff_pn #(3, 3'd0) regx_sys_err_fault_cnt (.clk(fs_clk), .rstn(sys_fs_rstn_fs), .din(sys_err_fault_cnt_pre), .dout(flt_err_cnt));  
 
     // ==========================================================================
-    // 输出赋值
+    // 其他固定逻辑
     // ==========================================================================
-    assign err_flags   = err_flags_reg;
-    assign err_code    = err_code_reg;
-    assign err_valid   = |err_flags_reg;                // 任意错误标志有效
-    assign flt_err_cnt = flt_err_cnt_reg;
+
 
 endmodule
