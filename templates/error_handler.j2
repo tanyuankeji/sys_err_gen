@@ -28,7 +28,7 @@ module sys_err_gen #(
     // 时钟与复位（固定）
     // ======================================================================
     input  wire                          sys_clk,            // 系统时钟
-    input  wire                          sys_rstn_sys,       // 异步复位，低有效
+    input  wire                          sys_fs_rstn_sys,       // 异步复位，低有效
     input  wire                          fs_clk,             // 功能安全时钟
     input  wire                          sys_fs_rstn_fs,     // 功能安全异步复位，低有效
 
@@ -84,7 +84,7 @@ module sys_err_gen #(
     // sync to hs 
     // ======================================================================
 {% for err in errors %}
-    clk_tran_2 utran_{{ err["数字信号"]}}_hs (.clk(sys_clk), .rstn(sys_rstn), .signal_in({{ err["数字信号"]}}), .signal_out({{ err["数字信号"]}}_hs));  // {{ err["模块"] }} - {{ err["错误"] }}
+    clk_tran_2 utran_{{ err["数字信号"]}}_hs (.clk(sys_clk), .rstn(sys_fs_rstn_sys), .signal_in({{ err["数字信号"]}}), .signal_out({{ err["数字信号"]}}_hs));  // {{ err["模块"] }} - {{ err["错误"] }}
 {% endfor %}
 
 
@@ -102,6 +102,7 @@ module sys_err_gen #(
 {% for err in errors %}
     dff_pn #(1, 0) regx_{{ err["数字信号"]}}_fs_d (.clk(fs_clk), .rstn(sys_fs_rstn_fs), .din({{ err["数字信号"]}}_fs), .dout({{ err["数字信号"]}}_fs_d));  // {{ err["模块"] }} - {{ err["错误"] }}
 {% endfor %}
+
 {% for err in errors %}
     assign {{ err["数字信号"]}}_fs_pos = {{ err["数字信号"]}}_fs & ~{{ err["数字信号"]}}_fs_d;
 {% endfor %}
@@ -122,7 +123,7 @@ module sys_err_gen #(
     // RSTB - 复位请求逻辑（仅包含 RSTB 非空的错误项）
     // ======================================================================
     // 如果 RSTB 非空，则该信号具备复位请求源
-    assign sys_err_rstb_req_pre = {
+    assign rstb_req_pre = {
 {% for err in rstb_errors %}
         {{err["数字信号"]}}_fs_pos{% if not loop.last %},
 {% endif %}
@@ -130,7 +131,7 @@ module sys_err_gen #(
     };
 
     // 如果 RSTB 非空，则该 imp[0] 使能位有效
-    assign sys_err_rstb_en = {
+    assign rstb_en = {
 {% for err in rstb_errors %}
         {{ err["数字信号"]}}_imp_sync[0]{% if not loop.last %},
 {% endif %}
@@ -139,15 +140,16 @@ module sys_err_gen #(
 {% endif %}
 
 
-    assign sys_err_rstb_req_pre = |(sys_err_rstb_req_pre & sys_err_rstb_en);
-
+    assign sys_err_rstb_req_pre = |(rstb_req_pre & rstb_en);
+    dff_pn #(1, 0) regx_sys_err_rstb_req (.clk(fs_clk), .rstn(sys_fs_rstn_fs), .din(sys_err_rstb_req_pre), .dout(sys_err_rstb_req)); 
+    
 
 {% if has_fusa %}
     // ======================================================================
     // FuSa - 功能安全请求逻辑（仅包含 FuSa 非空的错误项）
     // ======================================================================
     // 如果 FuSa 非空，则该信号具备功能安全请求源
-    assign sys_err_fusa_req_pre = {
+    assign fsxb_req_pre = {
 {% for err in fusa_errors %}
         {{ err["数字信号"]}}_fs_pos{% if not loop.last %},
 {% endif %}
@@ -155,7 +157,7 @@ module sys_err_gen #(
     };
 
     // 如果 FuSa 非空，则该 imp[1] 使能位有效
-    assign sys_err_fusa_en = {
+    assign sys_err_fsxb_en = {
 {% for err in fusa_errors %}
         {{ err["数字信号"]}}_imp_sync[1]{% if not loop.last %},
 {% endif %}
@@ -163,8 +165,8 @@ module sys_err_gen #(
         };
 {% endif %}
 
-    assign sys_err_fusa_req_pre = |(sys_err_fusa_req_pre & sys_err_fusa_en);
-
+    assign sys_err_fsxb_req_pre = |(fsxb_req_pre & fusa_en);
+    dff_pn #(1, 0) regx_sys_err_fsxb_req (.clk(fs_clk), .rstn(sys_fs_rstn_fs), .din(sys_err_fsxb_req_pre), .dout(sys_err_fsxb_req)); 
     
 {% if has_fltcnt %}
     // ==========================================================================
@@ -188,8 +190,9 @@ module sys_err_gen #(
 
     assign sys_err_err_cnt_add1 = sys_err_err_cnt_add1_pre & flt_cnt_en;
     assign sys_err_fault_cnt_add1_pre = |sys_err_err_cnt_add1;
+    dff_pn #(1, 0) regx_sys_err_fault_cnt_add1 (.clk(fs_clk), .rstn(sys_fs_rstn_fs), .din(sys_err_fault_cnt_add1_pre), .dout(sys_err_fault_cnt_add1)); 
 
-    // 故障计数累加（无逗号）
+    // 故障计数累加
     assign bit_all =
 {% for err in fltcnt_errors %}
         sys_err_err_cnt_add1[{{ loop.index0 }}]{% if not loop.last %} +
