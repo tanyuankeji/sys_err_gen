@@ -52,16 +52,22 @@ module sys_err_gen #(
     // --------------------------------------------------------------------------
     // 错误输出
     // --------------------------------------------------------------------------
-    output wire [3:0]                    flt_err_cnt         // 故障错误计数器
+    
+{% for err in errors %}
+    output wire                          {{ err["数字信号"]}}_hs，      // 同步到 hs 域
+{% endfor %}
+
+
+    output wire   sys_err_rstb_req,
+    output wire   sys_err_fsxb_req,
+    output wire   sys_err_fault_cnt_add1,
+    output wire [2:0]                    sys_err_fault_cnt         // 故障错误计数器
 );
 
     // ==========================================================================
     // 内部信号定义
     // ==========================================================================
 
-{% for err in errors %}
-    wire                                 {{ err["数字信号"]}}_hs;      // 同步到 hs 域
-{% endfor %}
 
 
 {% for err in errors %}
@@ -203,7 +209,7 @@ module sys_err_gen #(
 {% endif %}
 
     assign sys_err_fault_cnt_pre = (bit_all >= 5'd6) ? 3'd6 : bit_all[2:0];
-    dff_pn #(3, 3'd0) regx_sys_err_fault_cnt (.clk(fs_clk), .rstn(sys_fs_rstn_fs), .din(sys_err_fault_cnt_pre), .dout(flt_err_cnt));  
+    dff_pn #(3, 3'd0) regx_sys_err_fault_cnt (.clk(fs_clk), .rstn(sys_fs_rstn_fs), .din(sys_err_fault_cnt_pre), .dout(sys_err_fault_cnt));  
 
     // ==========================================================================
     // 其他固定逻辑
