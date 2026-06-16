@@ -74,12 +74,13 @@ module sys_err_gen #(
     wire                                 {{ err["数字信号"]}}_fs;      // 同步到 fs 域
 {% endfor %}
 
-
 {% for err in errors %}
     wire                                 {{ err["数字信号"]}}_fs_d;    // fs 域打一拍
-    wire                                 {{ err["数字信号"]}}_fs_pos;  // fs 域上升沿
 {% endfor %}
 
+{% for err in errors %}
+    wire                                 {{ err["数字信号"]}}_fs_pos;  // fs 域上升沿
+{% endfor %}
 
 {% for err in errors %}
     wire                                 {{ err["数字信号"]}}_imp_sync; // imp 同步到 fs 域
