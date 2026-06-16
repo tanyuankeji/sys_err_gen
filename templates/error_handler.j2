@@ -183,7 +183,7 @@ module sys_err_gen #(
     // 故障计数使能（统一使能）
     assign flt_cnt_en = {
 {% for err in fltcnt_errors %}
-        1'b1{% if not loop.last %},
+        1'b1{% if not loop.last %},  //{{ err["数字信号"]}}
 {% endif %}
 {% endfor %}
         };
