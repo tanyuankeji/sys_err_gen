@@ -54,13 +54,13 @@ module sys_err_gen #(
     // --------------------------------------------------------------------------
     
 {% for err in errors %}
-    output wire                          {{ err["数字信号"]}}_hs，      // 同步到 hs 域
+    output wire                          {{ err["数字信号"]}}_hs,       // 同步到 hs 域
 {% endfor %}
 
 
-    output wire   sys_err_rstb_req,
-    output wire   sys_err_fsxb_req,
-    output wire   sys_err_fault_cnt_add1,
+    output wire                          sys_err_rstb_req       ,
+    output wire                          sys_err_fsxb_req       ,
+    output wire                          sys_err_fault_cnt_add1 ,
     output wire [2:0]                    sys_err_fault_cnt         // 故障错误计数器
 );
 
@@ -86,6 +86,29 @@ module sys_err_gen #(
     wire                                 {{ err["数字信号"]}}_imp_sync; // imp 同步到 fs 域
 {% endfor %}
 
+    // --------------------------------------------------------------------------
+    // 控制信号位宽定义
+    // --------------------------------------------------------------------------
+{% if has_rstb %}
+    wire [{{ rstb_width - 1 }}:0]        rstb_req_pre;
+    wire [{{ rstb_width - 1 }}:0]        rstb_en;
+{% endif %}
+    wire                                 sys_err_rstb_req_pre;
+
+{% if has_fusa %}
+    wire [{{ fusa_width - 1 }}:0]        fsxb_req_pre;
+    wire [{{ fusa_width - 1 }}:0]        fsxb_en;
+{% endif %}
+    wire                                 sys_err_fsxb_req_pre;
+
+{% if has_fltcnt %}
+    wire [{{ fltcnt_width - 1 }}:0]      sys_err_err_cnt_add1_pre;
+    wire [{{ fltcnt_width - 1 }}:0]      flt_cnt_en;
+    wire [{{ fltcnt_width - 1 }}:0]      sys_err_err_cnt_add1;
+    wire                                 sys_err_fault_cnt_add1_pre;
+    wire [{{ bit_all_width - 1 }}:0]     bit_all;
+    wire [2:0]                           sys_err_fault_cnt_pre;
+{% endif %}
 
     // ======================================================================
     // sync to hs 
@@ -164,7 +187,7 @@ module sys_err_gen #(
     };
 
     // 如果 FuSa 非空，则该 imp[1] 使能位有效
-    assign sys_err_fsxb_en = {
+    assign fsxb_en = {
 {% for err in fusa_errors %}
         {{ err["数字信号"]}}_imp_sync[1]{% if not loop.last %},
 {% endif %}
@@ -199,13 +222,12 @@ module sys_err_gen #(
     assign sys_err_fault_cnt_add1_pre = |sys_err_err_cnt_add1;
     dff_pn #(1, 0) regx_sys_err_fault_cnt_add1 (.clk(fs_clk), .rstn(sys_fs_rstn_fs), .din(sys_err_fault_cnt_add1_pre), .dout(sys_err_fault_cnt_add1)); 
 
-    // 故障计数累加
+    // 故障计数累加（最后补 0 兜底）
     assign bit_all =
 {% for err in fltcnt_errors %}
-        sys_err_err_cnt_add1[{{ loop.index0 }}]{% if not loop.last %} +
-{% endif %}
+        sys_err_err_cnt_add1[{{ loop.index0 }}] +
 {% endfor %}
-        ;
+        0;
 
 {% endif %}
 

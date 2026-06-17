@@ -15,6 +15,7 @@ Jinja2 模板渲染引擎模块
     merged = SectionProtector.merge(old_code, code)
 """
 
+import math
 import os
 import re
 from pathlib import Path
@@ -184,11 +185,13 @@ def _build_filtered_lists(errors: List[Dict[str, Any]]) -> Dict[str, Any]:
     rstb_errors = [e for e in errors if e.get("RSTB", "") and str(e.get("RSTB", "")).strip()]
     result["has_rstb"] = len(rstb_errors) > 0
     result["rstb_errors"] = rstb_errors
+    result["rstb_width"] = len(rstb_errors)
 
     # FuSa
     fusa_errors = [e for e in errors if e.get("FuSa", "") and str(e.get("FuSa", "")).strip()]
     result["has_fusa"] = len(fusa_errors) > 0
     result["fusa_errors"] = fusa_errors
+    result["fusa_width"] = len(fusa_errors)
 
     # FLT_ERR_CNT
     fltcnt_errors = [
@@ -197,6 +200,9 @@ def _build_filtered_lists(errors: List[Dict[str, Any]]) -> Dict[str, Any]:
     ]
     result["has_fltcnt"] = len(fltcnt_errors) > 0
     result["fltcnt_errors"] = fltcnt_errors
+    result["fltcnt_width"] = len(fltcnt_errors)
+    # bit_all 位宽 = ceil(log2(fltcnt_width + 1))，最小为 1
+    result["bit_all_width"] = max(1, math.ceil(math.log2(len(fltcnt_errors) + 1)))
 
     return result
 
