@@ -222,12 +222,13 @@ module sys_err_gen #(
     assign sys_err_fault_cnt_add1_pre = |sys_err_err_cnt_add1;
     dff_pn #(1, 0) regx_sys_err_fault_cnt_add1 (.clk(fs_clk), .rstn(sys_fs_rstn_fs), .din(sys_err_fault_cnt_add1_pre), .dout(sys_err_fault_cnt_add1)); 
 
-    // 故障计数累加（最后补 0 兜底）
+    // 故障计数累加
     assign bit_all =
 {% for err in fltcnt_errors %}
-        sys_err_err_cnt_add1[{{ loop.index0 }}] +
+        sys_err_err_cnt_add1[{{ loop.index0 }}] {% if not loop.last %} +
+{% endif %}
 {% endfor %}
-        0;
+        ;
 
 {% endif %}
 
